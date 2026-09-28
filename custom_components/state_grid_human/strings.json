@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "国家电网",
+        "description": "输入国家电网账号信息。需要图形验证时，会打开人工验证码页面。",
+        "data": {
+          "account": "账号/手机号",
+          "password": "密码"
+        }
+      },
+      "captcha": {
+        "title": "国家电网安全验证",
+        "description": "请在打开的验证码页面中按提示依次点击。"
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接国家电网服务",
+      "captcha_response_invalid": "国家电网返回的验证码数据无法识别"
+    },
+    "abort": {
+      "captcha_expired": "验证码已过期，请重新开始",
+      "captcha_rejected": "验证码未通过",
+      "cannot_connect": "无法连接国家电网服务"
+    }
+  }
+}
