@@ -27,8 +27,17 @@ class CaptchaView(HomeAssistantView):
         if canvas and not canvas.startswith("data:"):
             canvas = f"data:image/png;base64,{canvas}"
         target = html.escape(session.target_text or "请依次点击指定图标")
-        max_clicks = len(session.icons) or 3
+        target_image = session.target_image
+        if target_image and not target_image.startswith("data:"):
+            target_image = f"data:image/png;base64,{target_image}"
         safe_canvas = html.escape(canvas, quote=True)
+        safe_target_image = html.escape(target_image, quote=True)
+        max_clicks = len(session.icons) or 3
+        instruction = (
+            f'<img class="target" src="{safe_target_image}" alt="点击顺序" />'
+            if safe_target_image
+            else f'<p class="hint">{target}</p>'
+        )
 
         page = f"""<!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -36,14 +45,14 @@ class CaptchaView(HomeAssistantView):
 <style>
 body{{font-family:system-ui,sans-serif;background:#f5f5f5;margin:0;padding:24px;color:#222}}
 main{{max-width:520px;margin:auto;background:#fff;border-radius:16px;padding:20px;box-shadow:0 4px 24px #0001}}
-h2{{margin:0 0 8px}} .hint{{margin:0 0 16px;font-size:18px}}
+h2{{margin:0 0 8px}} .hint{{margin:0 0 16px;font-size:18px}} .target{{max-width:100%;height:auto;margin:0 0 16px}}
 #wrap{{position:relative;width:min(100%,310px);margin:auto}}
 #captcha{{display:block;width:100%;height:auto;touch-action:none;user-select:none;cursor:crosshair}}
 .dot{{position:absolute;width:22px;height:22px;border:3px solid #1677ff;border-radius:50%;transform:translate(-50%,-50%);box-sizing:border-box;pointer-events:none}}
 button{{width:100%;margin-top:16px;height:44px;border:0;border-radius:10px;background:#1677ff;color:#fff;font-size:16px}}
 button:disabled{{opacity:.5}} #status{{margin-top:12px;text-align:center}}
 </style><main>
-<h2>国家电网安全验证</h2><p class="hint">{target}</p>
+<h2>国家电网安全验证</h2>{instruction}
 <div id="wrap"><img id="captcha" src="{safe_canvas}" alt="验证码"></div>
 <button id="ok" disabled>确定</button><div id="status"></div>
 <script>
