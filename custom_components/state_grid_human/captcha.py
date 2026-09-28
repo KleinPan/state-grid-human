@@ -13,6 +13,7 @@ class CaptchaSession:
     account: str
     password: str
     target_text: str = ""
+    target_image: str = ""
     canvas: str = ""
     icons: list[str] = field(default_factory=list)
     width: int = 310
