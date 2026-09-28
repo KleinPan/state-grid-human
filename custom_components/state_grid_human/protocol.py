@@ -1,9 +1,4 @@
-"""State Grid captcha protocol helpers.
-
-The endpoint names and the f07 payload shape mirror the public reference
-implementation. Network encryption/key negotiation is kept isolated here so
-it can be updated when 95598 changes its protocol.
-"""
+"""State Grid captcha protocol helpers."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,7 +19,6 @@ class CaptchaPayload:
 
 
 def build_get_captcha_payload(account: str, password: str) -> dict[str, Any]:
-    """Build the f05 captcha request body."""
     return {
         "account": account,
         "password": password,
@@ -33,10 +27,14 @@ def build_get_captcha_payload(account: str, password: str) -> dict[str, Any]:
     }
 
 
+def clicks_to_code(clicks: list[dict[str, int]]) -> str:
+    """Convert browser clicks to the f07 x,y|x,y representation."""
+    return "|".join(f"{item['x']},{item['y']}" for item in clicks)
+
+
 def build_click_payload(
     *, account: str, password: str, login_key: str, code: str
 ) -> dict[str, Any]:
-    """Build the f07 click-card request body."""
     return {
         "loginKey": login_key,
         "code": code,
@@ -52,8 +50,8 @@ def build_click_payload(
                 "pushId": "000000",
                 "addressProvince": "110100",
                 "password": password,
-                "account": account,
                 "addressRegion": "110101",
+                "account": account,
                 "addressCity": "330100",
             },
         },
@@ -67,4 +65,5 @@ __all__ = [
     "GET_VERIFY_CODE_API",
     "build_click_payload",
     "build_get_captcha_payload",
+    "clicks_to_code",
 ]
