@@ -11,11 +11,9 @@ from typing import Any
 
 from aiohttp import ClientSession
 
-from .const import BASE_API, GET_REQUEST_KEY_API
+from .const import BASE_API, CLICK_CARD_API, GET_REQUEST_KEY_API, GET_VERIFY_CODE_API
 from .crypto import json_compact, sm3_text, sm2_encrypt_key, sm4_encrypt_text, unwrap_data
 
-# These are public application-level identifiers used by the reference web
-# client. They are not a user's account credentials.
 APP_KEY = "7e5b5e84ddad4994b0ebc68dedca4962"
 APP_SECRET = "2bc37a881e1541aaa6e6e174658d150b"
 STATE_GRID_PUBLIC_KEY = (
@@ -31,6 +29,8 @@ class StateGridClient:
         self.key_code = secrets.token_hex(16)
         self.public_key = STATE_GRID_PUBLIC_KEY
         self.timestamp = 0
+        self.access_token: str | None = None
+        self.token: str | None = None
 
     def _headers(self) -> dict[str, str]:
         self.timestamp = int(time.time() * 1000)
@@ -44,23 +44,72 @@ class StateGridClient:
             "appKey": APP_KEY,
         }
 
-    async def negotiate_key(self) -> dict[str, Any]:
-        """Request the gateway key material.
-
-        The exact response wrapper has changed between State Grid gateway
-        versions, so the decrypted result is returned to the caller rather
-        than being silently interpreted here.
-        """
-        headers = self._headers()
-        body = {"client_id": APP_KEY, "client_secret": APP_SECRET}
-        encrypted = sm4_encrypt_text(json_compact(body), self.key_code)
-        payload = {
+    def _wrap(self, data: dict[str, Any]) -> dict[str, str]:
+        encrypted = sm4_encrypt_text(json_compact(data), self.key_code)
+        return {
             "data": encrypted + sm3_text(encrypted + str(self.timestamp)),
             "skey": sm2_encrypt_key(self.key_code, self.public_key),
-            "client_id": APP_KEY,
             "timestamp": str(self.timestamp),
         }
+
+    async def negotiate_key(self) -> dict[str, Any]:
+        """Request gateway key material and expose the raw response."""
+        headers = self._headers()
+        payload = self._wrap({"client_id": APP_KEY, "client_secret": APP_SECRET})
+        payload["client_id"] = APP_KEY
         async with self.session.post(BASE_API + GET_REQUEST_KEY_API, json=payload, headers=headers) as response:
+            response.raise_for_status()
+            result = await response.json()
+        if isinstance(result.get("data"), str):
+            try:
+                result["decrypted_data"] = unwrap_data(result["data"], self.key_code)
+            except Exception:
+                pass
+        return result
+
+    async def get_password_captcha(self, account: str, password: str) -> dict[str, Any]:
+        return await self.post_encrypted(
+            GET_VERIFY_CODE_API,
+            {"account": account, "password": password, "canvasHeight": 200, "canvasWidth": 310},
+            session_id=True,
+        )
+
+    async def click_card(self, account: str, password: str, login_key: str, code: str) -> dict[str, Any]:
+        data = {
+            "loginKey": login_key,
+            "code": code,
+            "params": {
+                "uscInfo": {"devciceIp": "", "tenant": "state_grid", "member": "0902", "devciceId": ""},
+                "quInfo": {
+                    "optSys": "android",
+                    "pushId": "000000",
+                    "addressProvince": "110100",
+                    "password": password,
+                    "account": account,
+                    "addressRegion": "110101",
+                    "addressCity": "330100",
+                },
+            },
+            "Channels": "web",
+        }
+        return await self.post_encrypted(CLICK_CARD_API, data, session_id=True)
+
+    async def post_encrypted(self, endpoint: str, data: dict[str, Any], *, session_id: bool = False) -> dict[str, Any]:
+        headers = self._headers()
+        payload = self._wrap({
+            "_access_token": self.access_token[len(self.access_token) // 2:] if self.access_token else "",
+            "_t": self.token[len(self.token) // 2:] if self.token else "",
+            "_data": data,
+            "timestamp": self.timestamp,
+        })
+        if session_id:
+            headers["sessionId"] = "web" + str(self.timestamp)
+        headers["keyCode"] = self.key_code
+        if self.access_token:
+            headers["Authorization"] = "Bearer " + self.access_token[: len(self.access_token) // 2]
+        if self.token:
+            headers["t"] = self.token[: len(self.token) // 2]
+        async with self.session.post(BASE_API + endpoint, json=payload, headers=headers) as response:
             response.raise_for_status()
             result = await response.json()
         if isinstance(result.get("data"), str):
