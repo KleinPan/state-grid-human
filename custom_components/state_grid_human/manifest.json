@@ -1,11 +1,12 @@
 {
   "domain": "state_grid_human",
   "name": "State Grid Human",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "documentation": "https://github.com/KleinPan/state-grid-human",
   "issue_tracker": "https://github.com/KleinPan/state-grid-human/issues",
   "codeowners": ["@KleinPan"],
   "config_flow": true,
+  "integration_type": "hub",
   "iot_class": "cloud_polling",
   "requirements": [],
   "dependencies": []
