@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-DOMAIN = "state_grid_human"
+from .const import DOMAIN
+from .http import CaptchaView
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the integration."""
     hass.data.setdefault(DOMAIN, {})
+    hass.http.register_view(CaptchaView)
     return True
 
 
