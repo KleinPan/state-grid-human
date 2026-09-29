@@ -1,8 +1,4 @@
-"""Low-level State Grid HTTP client.
-
-This module intentionally stops at the protocol boundary. It does not solve a
-captcha; captcha coordinates are supplied by the human captcha page.
-"""
+"""Low-level State Grid HTTP client."""
 from __future__ import annotations
 
 import secrets
@@ -21,12 +17,22 @@ STATE_GRID_PUBLIC_KEY = (
 )
 
 
+def _new_key_code() -> str:
+    """Generate the same kind of keyCode used by the current web client."""
+    return "".join(secrets.choice("0123456789") for _ in range(32))
+
+
 class StateGridClient:
-    """Minimal encrypted HTTP transport."""
+    """Encrypted State Grid gateway client.
+
+    Captcha solving is deliberately outside this class. A successful human
+    captcha is represented by its normal provider result and then consumed by
+    the authentication flow.
+    """
 
     def __init__(self, session: ClientSession) -> None:
         self.session = session
-        self.key_code = secrets.token_hex(16)
+        self.key_code = _new_key_code()
         self.public_key = STATE_GRID_PUBLIC_KEY
         self.timestamp = 0
         self.access_token: str | None = None
@@ -38,7 +44,7 @@ class StateGridClient:
             "Accept": "application/json;charset=UTF-8",
             "Content-Type": "application/json;charset=UTF-8",
             "version": "1.0",
-            "appId": "0901",
+            "source": "0901",
             "timestamp": str(self.timestamp),
             "wsgwType": "web",
             "appKey": APP_KEY,
@@ -53,11 +59,13 @@ class StateGridClient:
         }
 
     async def negotiate_key(self) -> dict[str, Any]:
-        """Request gateway key material and expose the raw response."""
+        """Initialize the encrypted gateway session."""
         headers = self._headers()
         payload = self._wrap({"client_id": APP_KEY, "client_secret": APP_SECRET})
         payload["client_id"] = APP_KEY
-        async with self.session.post(BASE_API + GET_REQUEST_KEY_API, json=payload, headers=headers) as response:
+        async with self.session.post(
+            BASE_API + GET_REQUEST_KEY_API, json=payload, headers=headers
+        ) as response:
             response.raise_for_status()
             result = await response.json()
         if isinstance(result.get("data"), str):
@@ -74,12 +82,19 @@ class StateGridClient:
             session_id=True,
         )
 
-    async def click_card(self, account: str, password: str, login_key: str, code: str) -> dict[str, Any]:
+    async def click_card(
+        self, account: str, password: str, login_key: str, code: str
+    ) -> dict[str, Any]:
         data = {
             "loginKey": login_key,
             "code": code,
             "params": {
-                "uscInfo": {"devciceIp": "", "tenant": "state_grid", "member": "0902", "devciceId": ""},
+                "uscInfo": {
+                    "devciceIp": "",
+                    "tenant": "state_grid",
+                    "member": "0902",
+                    "devciceId": "",
+                },
                 "quInfo": {
                     "optSys": "android",
                     "pushId": "000000",
@@ -94,14 +109,20 @@ class StateGridClient:
         }
         return await self.post_encrypted(CLICK_CARD_API, data, session_id=True)
 
-    async def post_encrypted(self, endpoint: str, data: dict[str, Any], *, session_id: bool = False) -> dict[str, Any]:
+    async def post_encrypted(
+        self, endpoint: str, data: dict[str, Any], *, session_id: bool = False
+    ) -> dict[str, Any]:
         headers = self._headers()
-        payload = self._wrap({
-            "_access_token": self.access_token[len(self.access_token) // 2:] if self.access_token else "",
-            "_t": self.token[len(self.token) // 2:] if self.token else "",
-            "_data": data,
-            "timestamp": self.timestamp,
-        })
+        payload = self._wrap(
+            {
+                "_access_token": self.access_token[len(self.access_token) // 2 :]
+                if self.access_token
+                else "",
+                "_t": self.token[len(self.token) // 2 :] if self.token else "",
+                "_data": data,
+                "timestamp": self.timestamp,
+            }
+        )
         if session_id:
             headers["sessionId"] = "web" + str(self.timestamp)
         headers["keyCode"] = self.key_code
@@ -109,7 +130,9 @@ class StateGridClient:
             headers["Authorization"] = "Bearer " + self.access_token[: len(self.access_token) // 2]
         if self.token:
             headers["t"] = self.token[: len(self.token) // 2]
-        async with self.session.post(BASE_API + endpoint, json=payload, headers=headers) as response:
+        async with self.session.post(
+            BASE_API + endpoint, json=payload, headers=headers
+        ) as response:
             response.raise_for_status()
             result = await response.json()
         if isinstance(result.get("data"), str):
