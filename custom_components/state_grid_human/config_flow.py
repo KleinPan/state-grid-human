@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-from homeassistant import config_entries
+from homeassistant import config_entries, data_entry_flow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .captcha import CaptchaSession, STORE, normalize_clicks
@@ -21,10 +21,11 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._account = ""
         self._password = ""
         self._client: StateGridClient | None = None
-        self._captcha_login_key = ""
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None):
-        """Collect credentials and request the reference password captcha."""
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> data_entry_flow.FlowResult:
+        """Collect credentials and request the password-login captcha."""
         errors: dict[str, str] = {}
         if user_input:
             self._account = str(user_input["account"]).strip()
@@ -33,19 +34,22 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._client = StateGridClient(session)
             try:
                 await self._client.negotiate_key()
-                result = await self._client.get_password_captcha(self._account, self._password)
+                result = await self._client.get_password_captcha(
+                    self._account, self._password
+                )
                 captcha = _extract_captcha(result)
                 if captcha is None:
                     errors["base"] = "captcha_response_invalid"
                 else:
-                    self._captcha_login_key = captcha["login_key"]
                     STORE.put(
                         CaptchaSession(
                             flow_id=self.flow_id,
                             login_key=captcha["login_key"],
                             account=self._account,
                             password=self._password,
-                            target_text=captcha.get("target_text", "请依次点击指定图标"),
+                            target_text=captcha.get(
+                                "target_text", "请依次点击指定图标"
+                            ),
                             target_image=captcha.get("target_image", ""),
                             canvas=captcha["canvas"],
                             icons=captcha.get("icons", []),
@@ -53,10 +57,15 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             height=captcha.get("height", 200),
                         )
                     )
-                    return self.async_show_external_step(
+                    # HA's external-step mechanism is designed for short-lived
+                    # human interaction. The browser opens only our captcha view,
+                    # not the 95598 login page.
+                    return self.async_external_step(
                         step_id="captcha",
                         url_path=f"{CAPTCHA_VIEW}/{self.flow_id}",
-                        description_placeholders={"url": f"{CAPTCHA_VIEW}/{self.flow_id}"},
+                        description_placeholders={
+                            "url": f"{CAPTCHA_VIEW}/{self.flow_id}"
+                        },
                     )
             except Exception:
                 errors["base"] = "cannot_connect"
@@ -72,10 +81,12 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_captcha(self, user_input: dict[str, Any] | None = None):
-        """Receive the coordinates from the human captcha page."""
+    async def async_step_captcha(
+        self, user_input: dict[str, Any] | None = None
+    ) -> data_entry_flow.FlowResult:
+        """Receive human captcha coordinates and finish authentication."""
         if not user_input:
-            return self.async_show_external_step(
+            return self.async_external_step(
                 step_id="captcha",
                 url_path=f"{CAPTCHA_VIEW}/{self.flow_id}",
                 description_placeholders={"url": f"{CAPTCHA_VIEW}/{self.flow_id}"},
@@ -92,6 +103,7 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 session.account, session.password, session.login_key, code
             )
         except Exception:
+            STORE.pop(self.flow_id)
             return self.async_abort(reason="cannot_connect")
 
         if not _is_login_success(result):
@@ -124,7 +136,9 @@ def _extract_captcha(result: dict[str, Any]) -> dict[str, Any] | None:
             return {
                 "canvas": canvas,
                 "login_key": login_key,
-                "target_text": item.get("targetText") or item.get("word") or "请依次点击指定图标",
+                "target_text": item.get("targetText")
+                or item.get("word")
+                or "请依次点击指定图标",
                 "target_image": item.get("wordSrc") or "",
                 "icons": item.get("iconSrcs") or [],
                 "width": int(item.get("canvasWidth") or 310),
