@@ -1,94 +1,84 @@
 # state-grid-human
 
-Home Assistant integration research project for State Grid (国家电网) that keeps captcha completion in the user's hands instead of using a vision LLM.
+Home Assistant integration for State Grid (国家电网) with **human-completed captcha**. No captcha-solving AI or OpenCV solver is used.
 
-## Current status
+## Current testable milestone: v0.4.0
 
-The repository contains a working prototype for the **password-login captcha** path and the protocol/session scaffolding needed for a human captcha step.
-
-A real 95598 browser HAR was also analyzed. The current web login is **not the same protocol as the older password-login path** exposed by the reference `state_grid` project.
-
-### Confirmed from the supplied HAR
-
-The current 95598 web flow uses Tencent Captcha:
+The repository now contains a complete **password-login authentication path** based on the older State Grid Web gateway protocol:
 
 ```text
-95598 login page
+HA Config Flow
     |
-    +-- /api/osg-open-uc0001/member/arg/010360007
+    +-- account + password
     |
-    +-- Tencent Captcha
-    |      |
-    |      +-- cap_union_prehandle
-    |      +-- cap_union_new_getcapbysig
-    |      +-- cap_union_new_verify
-    |      |
-    |      +-- returns ticket + randstr
+    +-- State Grid key/session negotiation
     |
-    +-- /api/osg-open-uc0001/member/arg/010360007
+    +-- c44/f05 captcha
+    |       |
+    |       +-- HA opens only a small captcha page
+    |       +-- user clicks the requested images
     |
-    +-- /api/osg-uc0013/member/c4/f02
+    +-- c44/f07 human captcha submission
     |
-    +-- /api/oauth2/outer/c02/f02
-    +-- /api/oauth2/oauth/authorize
-    +-- /api/oauth2/outer/getWebToken
+    +-- OAuth /authorize
     |
-    +-- authenticated business APIs
+    +-- OAuth /getWebToken
+    |
+    +-- Config Entry created with returned auth state
 ```
 
-The HAR contains a successful Tencent verification response with `errorCode=0`, `ticket`, and `randstr`. This means the project should **not attempt to reproduce or solve the Tencent challenge**. The intended design is to let the user complete the official captcha in a browser.
+The current implementation is deliberately limited to the password-login path until the newer phone/SMS protocol is fully identified. This gives us a clean real-device checkpoint without guessing encrypted request fields.
 
-The HAR also shows two very closely spaced OAuth request sequences. They occur within tens of milliseconds, so they are treated as frontend/concurrency behavior rather than evidence that the user logged in twice.
+## Real-device test
 
-The first authenticated State Grid business calls after `getWebToken` include account/user discovery endpoints such as `osg-open-uc0001/member/c9/f02`.
+1. In Home Assistant, add this GitHub repository as a **custom HACS repository** with category `Integration`, or manually copy `custom_components/state_grid_human` into the HA `custom_components` directory.
+2. Restart Home Assistant.
+3. Go to **Settings → Devices & services → Add integration**.
+4. Search for **国家电网（人工验证码）** / **State Grid Human**.
+5. Enter your own State Grid account and password.
+6. HA will request the captcha from State Grid.
+7. A small authenticated HA captcha page is opened; **only the captcha page is shown, not the 95598 login website**.
+8. Click the requested images in order and press **确定**.
+9. The integration submits the human result, performs the OAuth authorization-code exchange, and requests the WebToken.
+10. A successful login creates the Config Entry.
 
-## Important limitation
+### What success looks like
 
-The supplied HAR encrypts the State Grid request bodies. It therefore proves the request sequence and endpoint relationships, but it does **not** by itself reveal the plaintext schema of the phone/SMS login request.
+The Config Entry is created only after both of these conditions are true:
 
-In particular, the capture does not expose a clearly named `sendSms` endpoint. The same `member/arg/010360007` endpoint is called before and after Tencent verification, which strongly suggests that the login/pre-auth state is advanced there, but the exact encrypted payload must not be guessed.
+- the captcha/login response reports `resultCode=0000`;
+- OAuth returns an `access_token`.
 
-The next implementation target is therefore:
+If either step fails, the flow is aborted rather than creating a fake/partial login entry.
 
-1. reproduce the current State Grid key/session negotiation;
-2. decode the encrypted `010360007` response with the current gateway crypto;
-3. identify the plaintext fields containing the phone/Tencent ticket state;
-4. implement phone + human captcha + SMS login;
-5. exchange the OAuth authorization result for `WebToken`;
-6. persist/refresh authentication state;
-7. add account/electricity sensors.
+## Important: current web login vs legacy Web gateway
 
-## Architecture
+The supplied 2026-09-29 browser HAR showed a newer web flow using Tencent Captcha followed by:
 
 ```text
-Home Assistant Config Flow
-        |
-        +-- current phone-login flow
-        |       |
-        |       +-- official Tencent captcha
-        |       |       |
-        |       |       +-- user completes challenge
-        |       |
-        |       +-- State Grid pre-auth/session
-        |       +-- SMS verification
-        |       +-- OAuth authorization
-        |       +-- WebToken
-        |
-        +-- authenticated State Grid client
-                |
-                +-- account discovery
-                +-- balance / bill / daily usage
-                +-- HA sensors
+member/arg/010360007
+    ↓
+Tencent Captcha
+    ↓
+member/c4/f02
+    ↓
+OAuth c02/f02
+    ↓
+OAuth authorize
+    ↓
+getWebToken
 ```
 
-## Design principles
+That flow is **not silently treated as identical** to the older `c44/f05 → c44/f07 → OAuth` flow. The encrypted phone/SMS payload has not been guessed or fabricated. The next milestone is to add the newer phone/SMS flow while keeping the human captcha requirement.
+
+## Security / behavior
 
 - No captcha-solving AI.
 - No OpenCV captcha solver.
-- Prefer the official Tencent captcha UI whenever the current web flow permits it.
-- Keep captcha/session material in memory and expire it quickly.
-- Do not commit personal HAR files, cookies, authorization headers, phone numbers, SMS codes, or tokens.
-- Do not hard-code personal credentials or captured authentication tokens.
+- The user performs the captcha challenge themselves.
+- Captcha material and credentials used during Config Flow are kept in memory and the captcha session expires after five minutes.
+- Personal HAR files, cookies, authorization headers, phone numbers, SMS codes and personal tokens must never be committed.
+- Use the integration only with an account you are authorized to access.
 
 ## References
 
@@ -97,4 +87,4 @@ Home Assistant Config Flow
 
 ## Disclaimer
 
-This is an unofficial integration/research project. Use it only with your own account and comply with the service's terms.
+Unofficial integration/research project. Service-side behavior and authentication protocols may change at any time.
