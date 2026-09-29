@@ -57,9 +57,6 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             height=captcha.get("height", 200),
                         )
                     )
-                    # HA's external-step mechanism is designed for short-lived
-                    # human interaction. The browser opens only our captcha view,
-                    # not the 95598 login page.
                     return self.async_external_step(
                         step_id="captcha",
                         url_path=f"{CAPTCHA_VIEW}/{self.flow_id}",
@@ -97,7 +94,11 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="captcha_expired")
 
         try:
-            clicks = normalize_clicks(user_input.get("captcha_clicks"))
+            clicks = normalize_clicks(
+                user_input.get("captcha_clicks"),
+                width=session.width,
+                height=session.height,
+            )
             code = "|".join(f"{item['x']},{item['y']}" for item in clicks)
             result = await self._client.click_card(
                 session.account, session.password, session.login_key, code
