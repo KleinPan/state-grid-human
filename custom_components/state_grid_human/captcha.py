@@ -1,4 +1,4 @@
-"""Human captcha session state."""
+"""Short-lived state for human-completed State Grid captcha challenges."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,7 +25,7 @@ class CaptchaSession:
 
 
 class CaptchaStore:
-    """In-memory captcha store; images are never persisted."""
+    """In-memory captcha store; credentials and captcha material are not persisted."""
 
     def __init__(self) -> None:
         self._items: dict[str, CaptchaSession] = {}
@@ -49,15 +49,21 @@ class CaptchaStore:
 STORE = CaptchaStore()
 
 
-def normalize_clicks(value: Any) -> list[dict[str, int]]:
+def normalize_clicks(
+    value: Any, *, width: int = 310, height: int = 200
+) -> list[dict[str, int]]:
+    """Validate clicks against the source captcha dimensions."""
     if not isinstance(value, list) or not 1 <= len(value) <= 10:
         raise ValueError("invalid click list")
+
     result: list[dict[str, int]] = []
     for item in value:
         if not isinstance(item, dict):
             raise ValueError("invalid click item")
         x, y = item.get("x"), item.get("y")
-        if not isinstance(x, int) or not isinstance(y, int) or x < 0 or y < 0:
+        if not isinstance(x, int) or not isinstance(y, int):
             raise ValueError("invalid click coordinate")
+        if not 0 <= x < width or not 0 <= y < height:
+            raise ValueError("click outside captcha")
         result.append({"x": x, "y": y})
     return result
