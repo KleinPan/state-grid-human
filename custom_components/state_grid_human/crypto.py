@@ -1,9 +1,4 @@
-"""Small SM2/SM3/SM4 compatibility layer used by the State Grid protocol.
-
-The reference integration uses a JavaScript-compatible SM4-CBC wrapper and
-SM2 encryption.  gmssl is used here instead of carrying a large custom crypto
-implementation in the integration.
-"""
+"""SM2/SM3/SM4 helpers compatible with the State Grid web gateway."""
 from __future__ import annotations
 
 import base64
@@ -22,43 +17,46 @@ def sm3_text(value: str) -> str:
 
 
 def _sm4_key(key_code: str) -> bytes:
-    # keyCode is a 32-character hexadecimal string in the reference client.
-    if len(key_code) == 32:
-        try:
-            return bytes.fromhex(key_code)
-        except ValueError:
-            pass
-    return key_code.encode("utf-8")[:16].ljust(16, b"0")
+    """Return the gateway's 16-byte ASCII SM4 key.
+
+    The current web protocol uses a 32-character numeric keyCode, but it is
+    used as text bytes by the JavaScript SM4 implementation; it is *not* a
+    hexadecimal representation of the key.
+    """
+    raw = key_code.encode("utf-8")
+    return raw[:16].ljust(16, b"0")
 
 
 def _sm4_iv(key_code: str) -> bytes:
+    """The web client derives the CBC IV from the first/last 8 key characters."""
     raw = key_code.encode("utf-8")
     return (raw[:8] + raw[-8:]).ljust(16, b"0")[:16]
 
 
 def sm4_encrypt_text(value: str, key_code: str) -> str:
-    crypt = sm4.CryptSM4()
+    crypt = sm4.CryptSM4(padding_mode=sm4.PKCS7)
     crypt.set_key(_sm4_key(key_code), sm4.SM4_ENCRYPT)
     encrypted = crypt.crypt_cbc(_sm4_iv(key_code), value.encode("utf-8"))
     return base64.b64encode(encrypted).decode("ascii")
 
 
 def sm4_decrypt_text(value: str, key_code: str) -> str:
-    crypt = sm4.CryptSM4()
+    crypt = sm4.CryptSM4(padding_mode=sm4.PKCS7)
     crypt.set_key(_sm4_key(key_code), sm4.SM4_DECRYPT)
     decrypted = crypt.crypt_cbc(_sm4_iv(key_code), base64.b64decode(value))
     return decrypted.decode("utf-8")
 
 
 def sm2_encrypt_key(key_code: str, public_key: str) -> str:
-    # The reference client first converts the UTF-8 key string to its hex text
-    # representation before SM2 encryption.
+    """Encrypt the UTF-8 key's hex representation using SM2 C1C3C2."""
     plain = key_code.encode("utf-8").hex().encode("ascii")
     crypt = sm2.CryptSM2(public_key=public_key.removeprefix("04"), private_key="")
     return "04" + crypt.encrypt(plain).hex()
 
 
-def wrap_payload(data: dict[str, Any], key_code: str, public_key: str, timestamp: int) -> dict[str, str]:
+def wrap_payload(
+    data: dict[str, Any], key_code: str, public_key: str, timestamp: int
+) -> dict[str, str]:
     encrypted = sm4_encrypt_text(json_compact(data), key_code)
     return {
         "data": encrypted + sm3_text(encrypted + str(timestamp)),
