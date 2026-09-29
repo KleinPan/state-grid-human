@@ -1,62 +1,94 @@
 # state-grid-human
 
-Home Assistant integration for State Grid (国家电网) that lets the user complete the web captcha manually instead of using an AI captcha solver.
+Home Assistant integration research project for State Grid (国家电网) that keeps captcha completion in the user's hands instead of using a vision LLM.
 
 ## Current status
 
-The repository now contains the first end-to-end **human captcha prototype**:
+The repository contains a working prototype for the **password-login captcha** path and the protocol/session scaffolding needed for a human captcha step.
 
-- encrypted State Grid HTTP transport scaffold
-- f05 password-login captcha request
-- HA Config Flow external captcha step
-- responsive browser captcha page
-- mouse/touch coordinate capture in the captcha's native image coordinates
-- f07 click-card payload generation/submission
-- in-memory captcha sessions with a five-minute TTL
-- no vision LLM or automatic captcha solving
+A real 95598 browser HAR was also analyzed. The current web login is **not the same protocol as the older password-login path** exposed by the reference `state_grid` project.
 
-The final production flow still needs the current **mobile/SMS login API** and real-world verification against a live State Grid account. The current prototype intentionally exercises the password-login captcha path because that is the protocol exposed by the reference implementation.
+### Confirmed from the supplied HAR
+
+The current 95598 web flow uses Tencent Captcha:
+
+```text
+95598 login page
+    |
+    +-- /api/osg-open-uc0001/member/arg/010360007
+    |
+    +-- Tencent Captcha
+    |      |
+    |      +-- cap_union_prehandle
+    |      +-- cap_union_new_getcapbysig
+    |      +-- cap_union_new_verify
+    |      |
+    |      +-- returns ticket + randstr
+    |
+    +-- /api/osg-open-uc0001/member/arg/010360007
+    |
+    +-- /api/osg-uc0013/member/c4/f02
+    |
+    +-- /api/oauth2/outer/c02/f02
+    +-- /api/oauth2/oauth/authorize
+    +-- /api/oauth2/outer/getWebToken
+    |
+    +-- authenticated business APIs
+```
+
+The HAR contains a successful Tencent verification response with `errorCode=0`, `ticket`, and `randstr`. This means the project should **not attempt to reproduce or solve the Tencent challenge**. The intended design is to let the user complete the official captcha in a browser.
+
+The HAR also shows two very closely spaced OAuth request sequences. They occur within tens of milliseconds, so they are treated as frontend/concurrency behavior rather than evidence that the user logged in twice.
+
+The first authenticated State Grid business calls after `getWebToken` include account/user discovery endpoints such as `osg-open-uc0001/member/c9/f02`.
+
+## Important limitation
+
+The supplied HAR encrypts the State Grid request bodies. It therefore proves the request sequence and endpoint relationships, but it does **not** by itself reveal the plaintext schema of the phone/SMS login request.
+
+In particular, the capture does not expose a clearly named `sendSms` endpoint. The same `member/arg/010360007` endpoint is called before and after Tencent verification, which strongly suggests that the login/pre-auth state is advanced there, but the exact encrypted payload must not be guessed.
+
+The next implementation target is therefore:
+
+1. reproduce the current State Grid key/session negotiation;
+2. decode the encrypted `010360007` response with the current gateway crypto;
+3. identify the plaintext fields containing the phone/Tencent ticket state;
+4. implement phone + human captcha + SMS login;
+5. exchange the OAuth authorization result for `WebToken`;
+6. persist/refresh authentication state;
+7. add account/electricity sensors.
 
 ## Architecture
 
 ```text
 Home Assistant Config Flow
         |
-        +-- State Grid f05
+        +-- current phone-login flow
         |       |
-        |       +-- captcha images / loginKey
+        |       +-- official Tencent captcha
+        |       |       |
+        |       |       +-- user completes challenge
+        |       |
+        |       +-- State Grid pre-auth/session
+        |       +-- SMS verification
+        |       +-- OAuth authorization
+        |       +-- WebToken
         |
-        +-- external human captcha page
-        |       |
-        |       +-- user clicks target icons in order
-        |       |
-        |       +-- x,y|x,y|x,y
-        |
-        +-- State Grid f07
+        +-- authenticated State Grid client
                 |
-                +-- captcha accepted
+                +-- account discovery
+                +-- balance / bill / daily usage
+                +-- HA sensors
 ```
 
-## What remains
+## Design principles
 
-1. Verify the SM2/SM4 compatibility layer against a live f05 response.
-2. Confirm the exact captcha response field mapping on the current 95598 gateway.
-3. Capture and implement the current web **phone + SMS login** API.
-4. Persist/refresh the resulting access and refresh tokens.
-5. Add electricity-account discovery and HA sensors.
-
-## What the user needs to provide
-
-For the next stage, a single redacted browser network capture is the most useful input:
-
-1. Open 95598 in a desktop browser.
-2. Start phone-number login.
-3. Enter the captcha and complete it manually.
-4. Enter the SMS code and finish login.
-5. Export the relevant requests as HAR, or provide screenshots/text of the request URLs, headers and JSON bodies.
-6. Remove phone numbers, cookies, Authorization headers, tokens and other personal secrets before sharing.
-
-A successful capture lets the project switch from the current password-login prototype to the intended phone + human-captcha + SMS flow.
+- No captcha-solving AI.
+- No OpenCV captcha solver.
+- Prefer the official Tencent captcha UI whenever the current web flow permits it.
+- Keep captcha/session material in memory and expire it quickly.
+- Do not commit personal HAR files, cookies, authorization headers, phone numbers, SMS codes, or tokens.
+- Do not hard-code personal credentials or captured authentication tokens.
 
 ## References
 
@@ -65,4 +97,4 @@ A successful capture lets the project switch from the current password-login pro
 
 ## Disclaimer
 
-This is an unofficial integration. Use it only with your own account and comply with the service's terms.
+This is an unofficial integration/research project. Use it only with your own account and comply with the service's terms.
