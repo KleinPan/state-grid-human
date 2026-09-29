@@ -12,7 +12,7 @@ from .client import StateGridClient
 from .const import CAPTCHA_VIEW, DOMAIN
 
 
-class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure a State Grid account while keeping captcha interaction human."""
 
     VERSION = 1
