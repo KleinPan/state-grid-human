@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'custom_components/**'
+      - 'pyproject.toml'
+      - 'manifest.json'
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('custom_components/state_grid_human/manifest.json')
+          print(json.loads(p.read_text())['version'])
+          PY
+          )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Package integration
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -R custom_components/state_grid_human dist/state_grid_human
+          cd dist
+          zip -r "state_grid_human-${{ steps.version.outputs.version }}.zip" state_grid_human
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "dist/state_grid_human-${{ steps.version.outputs.version }}.zip" --clobber
+          else
+            gh release create "$TAG" "dist/state_grid_human-${{ steps.version.outputs.version }}.zip" \
+              --title "State Grid Human $TAG" \
+              --generate-notes
+          fi
