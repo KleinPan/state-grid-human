@@ -1,7 +1,7 @@
 {
   "domain": "state_grid_human",
   "name": "State Grid Human",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "documentation": "https://github.com/KleinPan/state-grid-human",
   "issue_tracker": "https://github.com/KleinPan/state-grid-human/issues",
   "codeowners": ["@KleinPan"],
