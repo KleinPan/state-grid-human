@@ -34,9 +34,7 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._client = StateGridClient(session)
             try:
                 await self._client.negotiate_key()
-                result = await self._client.get_password_captcha(
-                    self._account, self._password
-                )
+                result = await self._client.get_password_captcha(self._account, self._password)
                 captcha = _extract_captcha(result)
                 if captcha is None:
                     errors["base"] = "captcha_response_invalid"
@@ -47,9 +45,7 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             login_key=captcha["login_key"],
                             account=self._account,
                             password=self._password,
-                            target_text=captcha.get(
-                                "target_text", "请依次点击指定图标"
-                            ),
+                            target_text=captcha.get("target_text", "请依次点击指定图标"),
                             target_image=captcha.get("target_image", ""),
                             canvas=captcha["canvas"],
                             icons=captcha.get("icons", []),
@@ -60,21 +56,14 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return self.async_external_step(
                         step_id="captcha",
                         url_path=f"{CAPTCHA_VIEW}/{self.flow_id}",
-                        description_placeholders={
-                            "url": f"{CAPTCHA_VIEW}/{self.flow_id}"
-                        },
+                        description_placeholders={"url": f"{CAPTCHA_VIEW}/{self.flow_id}"},
                     )
             except Exception:
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("account"): str,
-                    vol.Required("password"): str,
-                }
-            ),
+            data_schema=vol.Schema({vol.Required("account"): str, vol.Required("password"): str}),
             errors=errors,
         )
 
@@ -95,26 +84,31 @@ class StateGridHumanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             clicks = normalize_clicks(
-                user_input.get("captcha_clicks"),
-                width=session.width,
-                height=session.height,
+                user_input.get("captcha_clicks"), width=session.width, height=session.height
             )
             code = "|".join(f"{item['x']},{item['y']}" for item in clicks)
-            result = await self._client.click_card(
+            result = await self._client.login_password(
                 session.account, session.password, session.login_key, code
             )
         except Exception:
             STORE.pop(self.flow_id)
             return self.async_abort(reason="cannot_connect")
 
-        if not _is_login_success(result):
+        if not _is_login_success(result.get("login", result)) or not self._client.access_token:
             STORE.pop(self.flow_id)
             return self.async_abort(reason="captcha_rejected")
 
         STORE.pop(self.flow_id)
         return self.async_create_entry(
             title=f"国家电网 {self._account}",
-            data={"account": self._account},
+            data={
+                "account": self._account,
+                "access_token": self._client.access_token,
+                "refresh_token": self._client.refresh_token or "",
+                "login_token": self._client.token or "",
+                "key_code": self._client.key_code,
+                "user_info": self._client.user_info,
+            },
         )
 
 
@@ -137,9 +131,7 @@ def _extract_captcha(result: dict[str, Any]) -> dict[str, Any] | None:
             return {
                 "canvas": canvas,
                 "login_key": login_key,
-                "target_text": item.get("targetText")
-                or item.get("word")
-                or "请依次点击指定图标",
+                "target_text": item.get("targetText") or item.get("word") or "请依次点击指定图标",
                 "target_image": item.get("wordSrc") or "",
                 "icons": item.get("iconSrcs") or [],
                 "width": int(item.get("canvasWidth") or 310),
