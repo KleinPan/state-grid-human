@@ -1,6 +1,7 @@
 """Low-level State Grid HTTP client with sanitized diagnostic logging."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -67,6 +68,12 @@ def _mask_account(account: str) -> str:
     return account[:2] + "*" * (len(account) - 4) + account[-2:]
 
 
+def _request_fingerprint(payload: dict[str, Any]) -> str:
+    """Fingerprint the encrypted request for correlation without exposing it."""
+    raw = json_compact(payload).encode()
+    return hashlib.sha256(raw).hexdigest()[:12]
+
+
 class StateGridClient:
     """Encrypted State Grid gateway client."""
 
@@ -116,10 +123,17 @@ class StateGridClient:
         headers = self._headers()
         payload = self._wrap({"client_id": APP_KEY, "client_secret": self.app_secret})
         payload["client_id"] = APP_KEY
-        _LOGGER.debug("State Grid negotiate_key: POST %s timestamp=%s", GET_REQUEST_KEY_API, self.timestamp)
+        _LOGGER.debug(
+            "State Grid negotiate_key: POST %s timestamp=%s payload_keys=%s data_len=%s skey_len=%s fingerprint=%s",
+            GET_REQUEST_KEY_API, self.timestamp, list(payload), len(payload.get("data", "")),
+            len(payload.get("skey", "")), _request_fingerprint(payload),
+        )
         async with self.session.post(BASE_API + GET_REQUEST_KEY_API, json=payload, headers=headers) as response:
             raw = await response.text()
-            _LOGGER.debug("State Grid negotiate_key: HTTP %s body=%s", response.status, _safe_value(_try_json(raw)))
+            _LOGGER.debug(
+                "State Grid negotiate_key: HTTP %s content_type=%s response_len=%s body=%s",
+                response.status, response.headers.get("Content-Type"), len(raw), _safe_value(_try_json(raw)),
+            )
             response.raise_for_status()
             result = _try_json(raw)
         if isinstance(result.get("data"), dict):
@@ -136,7 +150,10 @@ class StateGridClient:
         return result
 
     async def get_password_captcha(self, account: str, password: str) -> dict[str, Any]:
-        _LOGGER.debug("State Grid password captcha: POST %s account=%s password_len=%s", GET_VERIFY_CODE_API, _mask_account(account), len(password))
+        _LOGGER.debug(
+            "State Grid password captcha: POST %s account=%s password_len=%s key_code_len=%s",
+            GET_VERIFY_CODE_API, _mask_account(account), len(password), len(self.key_code),
+        )
         result = await self.post_encrypted(
             GET_VERIFY_CODE_API,
             {"account": account, "password": password, "canvasHeight": 200, "canvasWidth": 310},
@@ -267,12 +284,26 @@ class StateGridClient:
             headers["Authorization"] = "Bearer " + self.access_token[: len(self.access_token) // 2]
         if self.token:
             headers["t"] = self.token[: len(self.token) // 2]
-        _LOGGER.debug("State Grid API: POST %s session_id=%s account=%s", endpoint, session_id, _mask_account(str(data.get("account", ""))))
+        _LOGGER.debug(
+            "State Grid API: POST %s session_id=%s account=%s timestamp=%s payload_keys=%s data_len=%s skey_len=%s key_code_len=%s fingerprint=%s",
+            endpoint, session_id, _mask_account(str(data.get("account", ""))), self.timestamp,
+            list(payload), len(payload.get("data", "")), len(payload.get("skey", "")), len(self.key_code),
+            _request_fingerprint(payload),
+        )
+        _LOGGER.debug(
+            "State Grid API headers: version=%s source=%s wsgwType=%s appKey=%s sessionId_present=%s authorization_present=%s t_present=%s",
+            headers.get("version"), headers.get("source"), headers.get("wsgwType"), headers.get("appKey"),
+            "sessionId" in headers, "Authorization" in headers, "t" in headers,
+        )
         async with self.session.post(BASE_API + endpoint, json=payload, headers=headers) as response:
             raw = await response.text()
-            _LOGGER.debug("State Grid API: %s HTTP %s body=%s", endpoint, response.status, _safe_value(_try_json(raw)))
+            parsed = _try_json(raw)
+            _LOGGER.debug(
+                "State Grid API: %s HTTP %s content_type=%s response_len=%s body=%s",
+                endpoint, response.status, response.headers.get("Content-Type"), len(raw), _safe_value(parsed),
+            )
             response.raise_for_status()
-            result = _try_json(raw)
+            result = parsed
         if isinstance(result.get("data"), str):
             try:
                 result["decrypted_data"] = unwrap_data(result["data"], self.key_code)
